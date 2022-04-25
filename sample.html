@@ -1,0 +1,104 @@
+<!DOCTYPE html >
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<meta http-equiv="Content-Script-Type" content="text/javascript">
+</head>
+<title>Sample naiveGPXlogger control</title>
+<body style="font-size:xx-large;">
+<br>
+Write log to <input type="text", id='toLogFile' size="50rem"> <span style="font-size:50%;">with trailing slash</span><br>
+Logging: <input type="checkbox" id="doLogging" onChange="loggingChange();" disabled> <span id="loggingStatus" style="font-size:75%;"></span><br>
+<br>
+Server return: <span id="message" style="font-size:75%;"></span><br>
+<br>
+Log file: <span id="logFile" style="font-size:75%;"></span><br>
+</body>
+<script>
+let logging;
+console.log('Trying to open socket');
+const socket = new WebSocket("ws://localhost:3000/signalk/v1/stream?subscribe=none");
+
+socket.onopen = function(e) {
+	console.log("socket open");
+	doLogging.disabled = false;
+	socket.send(`{
+		"context": "vessels.self",
+		"subscribe": [
+			{
+				"path": "navigation.trip.logging",
+				"format": "delta",
+				"policy": "instant",
+				"minPeriod": 0
+			}
+		]
+	}`);
+	
+};
+
+socket.onmessage = function(event) {
+	message.innerText = event.data;
+	if(!event.data.includes('updates')) return;
+	logging = JSON.parse(event.data).updates[0].values[0].value;
+	if(logging.status){
+		doLogging.checked = true;
+		loggingStatus.innerText = 'Logging ON';
+		logFile.innerText = logging.logFile;
+	}
+	else {
+		doLogging.checked = false;
+		loggingStatus.innerText = 'Logging OFF';
+		logFile.innerText = '';
+	}
+
+};
+
+socket.onclose = function(event) {
+	doLogging.disabled = true;
+	if (event.wasClean) {
+		console.log(`socket closed cleanly, code=${event.code} reason=${event.reason}`);
+	} 
+	else {
+		loggingStatus.innerText = 'socket closed by unknown reason';
+		console.log('socket closed by unknown reason');
+	}
+};
+
+socket.onerror = function(error) {
+	console.log(`socket error ${error.message}`);
+};
+
+
+
+function loggingChange(){
+let status, logFile, delta;
+if(doLogging.checked) {
+	status = true;
+	logFile = toLogFile.value;
+}
+else {
+	status = false
+	logFile = '';
+}
+delta = {
+	context: 'vessels.self',
+	updates: [
+		{
+			values: [
+				{
+					"path": "navigation.trip.logging",
+					"value": {
+						"status": status,
+						"logFile": logFile,
+					},
+				}
+			],
+			timestamp: new Date().toISOString(),
+		}
+	]
+};
+socket.send(JSON.stringify(delta));
+
+} // end function loggingChange
+</script>
+</html>
