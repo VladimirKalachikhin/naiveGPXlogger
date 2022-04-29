@@ -165,17 +165,11 @@ plugin.start = function (options, restartPlugin) {
 			//
 			// Новый трек каждый день
 			if(options.everyDay){
-				if((new Date(lastFix).getDate()-new Date().getDate()) != 0){	//app.debug('последний фикс был вчера');
-					if(routeSaveName) closeTrack();	// запись могла и не начинаться, routeSaveName нет
-					routeSaveName = new Date().toJSON()+'.gpx'; 	// 
-					routeSaveName = path.resolve(options.trackDir,routeSaveName);
-					try {
-						fs.appendFileSync(routeSaveName, beginGPX);
-					} 
-					catch (err) {
-						console.error(err.message);
-						app.setPluginError('Unable to continue logging:',err.message);
-					}
+				//if((new Date(lastFix).getMinutes()-new Date().getMinutes()) != 0){	// каждую минуту
+				if((new Date(lastFix).getDate()-new Date().getDate()) != 0){	//
+					switchOff();
+					switchOn();
+					app.debug('Opened new track by new day');
 				}
 			}
 
