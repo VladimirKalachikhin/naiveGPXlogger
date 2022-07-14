@@ -62,6 +62,7 @@ var beginGPX = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 	<trk>
 		<trkseg>
 `;
+var newLog = false;	// флаг что файл новый, для того, чтобы туда записали хотя бы одну точку
 
 plugin.start = function (options, restartPlugin) {
 //
@@ -127,11 +128,15 @@ plugin.start = function (options, restartPlugin) {
 			break;
 		case '</trkseg>':
 			gpxtrack = '\n		<trkseg>\n'
+			// записать хотя бы одну точку в сегмент. Нужно ли это, если точка такая же, как последняя в 
+			// предыдущем сегменте? Иначе -- запишется пустой сегмент. И ладно.
+			//newLog = true;	
 			break;
 		}
 	}
 	else {
 		gpxtrack = beginGPX;
+		newLog = true;
 	}
 	//app.debug(routeSaveName,'gpxtrack:',gpxtrack);
 
@@ -198,13 +203,15 @@ plugin.start = function (options, restartPlugin) {
 							return;
 						}
 						//app.debug('equirectangularDistance=',equirectangularDistance(lastPosition,value.value),'options.minmove=',options.minmove);
-						if(equirectangularDistance(lastPosition,value.value)<options.minmove) return;
+						// в файле есть хотя бы одна точка, и расстояние от предыдущей до текущей меньше указанного
+						if(!newLog && (equirectangularDistance(lastPosition,value.value)<options.minmove)) return;
 						let trkpt = '			<trkpt ';
 						trkpt += `lat="${value.value.latitude}" lon="${value.value.longitude}">\n`;
 						trkpt += `				<time> ${timestamp} </time>\n`;
 						trkpt += '			</trkpt>\n';
+						// если долго не было координат -- сначала завершим сегмент
+						if((Date.parse(timestamp)-lastFix)>(options.trackTimeout*1000)) trkpt = '		</trkseg>\n		<trkseg>\n' + trkpt;	
 						//app.debug('trkpt:',trkpt);
-						if((Date.parse(timestamp)-lastFix)>(options.trackTimeout*1000)) trkpt = '		</trkseg>\n		<trkseg>\n' + trkpt;	// если долго не было координат -- завершим сегмент
 						try {
 							fs.appendFileSync(routeSaveName, trkpt);
 						} 
@@ -212,6 +219,7 @@ plugin.start = function (options, restartPlugin) {
 							console.error('[doOnValue]',err.message);
 							app.setPluginError('Unable write point: '+err.message);
 						}
+						newLog = false;
 						lastPosition = value.value;	// новая последняя позиция
 						lastFix = Date.parse(timestamp);
 						break;
@@ -293,7 +301,7 @@ plugin.start = function (options, restartPlugin) {
 			// setImmediate -- то же, что setTimeout(() => {}, 0), но NodeJS-специфично.
 			setImmediate(()=>{updSKpath(logging,routeSaveName)});	
 			realDoLogging();	// запустим собственно процесс записи трека
-			app.debug('Log enabled');
+			app.debug('Log enabled, log file '+routeSaveName);
 			app.setPluginStatus('Log enabled, log file '+routeSaveName);
 		}
 		else {	// запись включить невозможно
@@ -302,7 +310,6 @@ plugin.start = function (options, restartPlugin) {
 			app.setPluginStatus('Log disabled. Recording cannot be enabled due to the inability to open the file '+routeSaveName);
 			//updSKpath(logging,routeSaveName);
 			setImmediate(()=>{updSKpath(logging,routeSaveName)});
-			routeSaveName = false;
 		}
 		options.logging = logging;
 		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
@@ -320,7 +327,7 @@ plugin.start = function (options, restartPlugin) {
 		app.setPluginStatus('Log disabled');
 		options.logging = logging;
 		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
-	} // end function switchOn
+	} // end function switchOff
 
 
 
@@ -373,17 +380,20 @@ plugin.stop = function () {
 
 function closeTrack(){
 	app.debug('closeTrack',routeSaveName);
-	const close = '		</trkseg>\n	</trk>\n</gpx>';
-	try {
-		fs.appendFileSync(routeSaveName, close);
-	} 
-	catch (err) {
-		console.error('[closeTrack]',err.message);
-		app.setPluginError('Unable close gpx: '+err.message);
+	if(fs.existsSync(routeSaveName)){
+		const close = '		</trkseg>\n	</trk>\n</gpx>';
+		try {
+			fs.appendFileSync(routeSaveName, close);
+		} 
+		catch (err) {
+			console.error('[closeTrack]',err.message);
+			app.setPluginError('Unable close gpx: '+err.message);
+		}
 	}
 } // end function closeTrack
 
 function updSKpath(status=false,logFile=''){
+	if(status) status = true;	// никогда не должно быть, чтобы status не был boolean, но...
 	app.handleMessage(plugin.id, {
 		context: 'vessels.self',
 		updates: [
