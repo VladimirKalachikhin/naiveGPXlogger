@@ -70,14 +70,26 @@ plugin.start = function (options, restartPlugin) {
 	
 	if(!options.trackDir) options.trackDir = 'track';
 	if(options.trackDir[0]!='/') options.trackDir = path.resolve(__dirname,options.trackDir);	// если путь не абсолютный -- сделаем абсолютным
-	if(!fs.existsSync(options.trackDir)){
-		options.trackDir = path.resolve(__dirname,'track');
-		if(!fs.existsSync(options.trackDir)) fs.mkdirSync(options.trackDir);
+	try{
+		fs.mkdirSync(options.trackDir,{recursive:true});
+	}
+	catch(error){
+		switch(error.code){
+		case 'EACCES':	// Permission denied
+		case 'EPERM':	// Operation not permitted
+			app.debug(`False to create ${options.trackDir} by Permission denied`);
+			app.setPluginError(`False to create ${options.trackDir} by Permission denied`);
+			break;
+		case 'ETIMEDOUT':	// Operation timed out
+			app.debug(`False to create ${options.trackDir} by Operation timed out`);
+			app.setPluginError(`False to create ${options.trackDir} by Operation timed out`);
+			break;
+		}
 	}
 
 	logging = options.logging;
 	app.debug('plugin started, now logging is',logging,'log dir is',options.trackDir);
-	app.setPluginStatus(`Started, now logging is ${logging}, log dir is ${options.trackDir}`);
+	app.setPluginStatus(`Started, now 'logging' setted to ${logging}, log dir is ${options.trackDir}, ready to recording.`);
 	updSKpath(logging,routeSaveName); 	// установим пути в SignalK согласно options.logging
 	logging = false;	// укажем, что на самом деле запись трека не происходит
 	//app.debug('Start, logging=',logging,'navigation.trip.logging.value',app.getSelfPath('navigation.trip.logging.value'));
@@ -128,8 +140,8 @@ plugin.start = function (options, restartPlugin) {
 		fs.appendFileSync(routeSaveName, gpxtrack);
 	} 
 	catch (err) {
-		console.error(err.message);
-		app.setPluginError('Unable logging:',err.message);
+		console.error('[openTrack]',err.message);
+		app.setPluginError('Unable logging: '+err.message);
 		return false;
 	}
 	
@@ -155,7 +167,8 @@ plugin.start = function (options, restartPlugin) {
 			TPVsubscribe,	// подписка
 			unsubscribes,	// массив функций отписки
 			subscriptionError => {	// обработчик ошибки
-				app.error('Error subscription to data:' + subscriptionError);
+				app.debug('Error subscription to data:' + subscriptionError);
+				//app.error('Error subscription to data:' + subscriptionError); 	// реально то же самое, что и app.debug, но без выделения цветом
 				app.setPluginError('Error subscription to data:'+subscriptionError.message);
 			},
 			doOnValue	// функция обработки каждой delta
@@ -184,20 +197,20 @@ plugin.start = function (options, restartPlugin) {
 							lastPosition = value.value;
 							return;
 						}
-						//app.debug(equirectangularDistance(lastPosition,value.value));
+						//app.debug('equirectangularDistance=',equirectangularDistance(lastPosition,value.value),'options.minmove=',options.minmove);
 						if(equirectangularDistance(lastPosition,value.value)<options.minmove) return;
 						let trkpt = '			<trkpt ';
 						trkpt += `lat="${value.value.latitude}" lon="${value.value.longitude}">\n`;
 						trkpt += `				<time> ${timestamp} </time>\n`;
 						trkpt += '			</trkpt>\n';
-						//app.debug(trkpt);
+						//app.debug('trkpt:',trkpt);
 						if((Date.parse(timestamp)-lastFix)>(options.trackTimeout*1000)) trkpt = '		</trkseg>\n		<trkseg>\n' + trkpt;	// если долго не было координат -- завершим сегмент
 						try {
 							fs.appendFileSync(routeSaveName, trkpt);
 						} 
 						catch (err) {
-							console.error(err.message);
-							app.setPluginError('Unable write point:',err.message);
+							console.error('[doOnValue]',err.message);
+							app.setPluginError('Unable write point: '+err.message);
 						}
 						lastPosition = value.value;	// новая последняя позиция
 						lastFix = Date.parse(timestamp);
@@ -226,7 +239,8 @@ plugin.start = function (options, restartPlugin) {
 			TPVsubscribe,	// подписка
 			unsubscribesControl,	// массив функций отписки
 			subscriptionError => {	// обработчик ошибки
-				app.error('Error subscription to control:' + subscriptionError);
+				//app.error('Error subscription to control:' + subscriptionError);
+				app.debug('Error subscription to control:' + subscriptionError);
 				app.setPluginError('Error subscription to control:'+subscriptionError.message);
 			},
 			doOnControl	// функция обработки каждой delta
@@ -284,8 +298,11 @@ plugin.start = function (options, restartPlugin) {
 		}
 		else {	// запись включить невозможно
 			logging = false;
+			app.debug('Log disabled by return false from openTrack()');
+			app.setPluginStatus('Log disabled. Recording cannot be enabled due to the inability to open the file '+routeSaveName);
 			//updSKpath(logging,routeSaveName);
 			setImmediate(()=>{updSKpath(logging,routeSaveName)});
+			routeSaveName = false;
 		}
 		options.logging = logging;
 		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
@@ -309,12 +326,12 @@ plugin.start = function (options, restartPlugin) {
 
 	function equirectangularDistance(from,to){
 	// https://www.movable-type.co.uk/scripts/latlong.html
-	// Но ещё проще на плоскости. Но надо ли?
-	let lat1 = from.latitude;
-	let lat2 = to.latitude;
-	let lon1 = from.longitude;
-	let lon2 = to.longitude;
-	const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180, Δλ = (lon2-lon1) * Math.PI/180, R = 6371e3;
+	// from,to: {longitude: xx, latitude: xx}
+	const rad = Math.PI/180;
+	const φ1 = from.latitude * rad;
+	const φ2 = to.latitude * rad;
+	const Δλ = (to.longitude-from.longitude) * rad;
+	const R = 6371e3;	// метров
 	const x = Δλ * Math.cos((φ1+φ2)/2);
 	const y = (φ2-φ1);
 	const d = Math.sqrt(x*x + y*y) * R;	// метров
@@ -361,8 +378,8 @@ function closeTrack(){
 		fs.appendFileSync(routeSaveName, close);
 	} 
 	catch (err) {
-		console.error(err.message);
-		app.setPluginError('Unable close gpx:',err.message);
+		console.error('[closeTrack]',err.message);
+		app.setPluginError('Unable close gpx: '+err.message);
 	}
 } // end function closeTrack
 
