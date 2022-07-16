@@ -1,6 +1,8 @@
 module.exports = function (app) {
 const fs = require('fs');
 const events = require('events');
+const path = require('path');
+const cp = require('child_process');
 
 var plugin = {};
 plugin.id = 'naivegpxlogger';
@@ -53,7 +55,7 @@ plugin.schema = {
 
 var unsubscribes = []; 	// массив функций, которые отписываются от подписки на координаты
 var unsubscribesControl = [];	// от подписки на управление
-var	routeSaveName=''; 	// 
+var	routeSaveName=null; 	// 
 var logging;	// текущее состояние записи трека
 var beginGPX = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <gpx xmlns="http://www.topografix.com/GPX/1/1"  creator="${plugin.name}" version="1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
@@ -66,32 +68,22 @@ var newLog = false;	// флаг что файл новый, для того, ч�
 
 plugin.start = function (options, restartPlugin) {
 //
-	const path = require('path');
-	const cp = require('child_process');
+	//app.debug('__dirname=',__dirname);
 	
+	// Установка умолчального значения каталога для записи лога
 	if(!options.trackDir) options.trackDir = 'track';
-	if(options.trackDir[0]!='/') options.trackDir = path.resolve(__dirname,options.trackDir);	// если путь не абсолютный -- сделаем абсолютным
-	try{
-		fs.mkdirSync(options.trackDir,{recursive:true});
-	}
-	catch(error){
-		switch(error.code){
-		case 'EACCES':	// Permission denied
-		case 'EPERM':	// Operation not permitted
-			app.debug(`False to create ${options.trackDir} by Permission denied`);
-			app.setPluginError(`False to create ${options.trackDir} by Permission denied`);
-			break;
-		case 'ETIMEDOUT':	// Operation timed out
-			app.debug(`False to create ${options.trackDir} by Operation timed out`);
-			app.setPluginError(`False to create ${options.trackDir} by Operation timed out`);
-			break;
-		}
+	if(options.trackDir[0]!='/') options.trackDir = path.join(__dirname,options.trackDir);	// если путь не абсолютный -- сделаем абсолютным
+	//app.debug('options.trackDir=',options.trackDir);
+	// Создание каталога для записи лога
+	if(!createDir(options.trackDir)) {
+		plugin.stop();
+		return;
 	}
 
 	logging = options.logging;
 	app.debug('plugin started, now logging is',logging,'log dir is',options.trackDir);
 	app.setPluginStatus(`Started, now 'logging' setted to ${logging}, log dir is ${options.trackDir}, ready to recording.`);
-	updSKpath(logging,routeSaveName); 	// установим пути в SignalK согласно options.logging
+	updSKpath(logging,routeSaveName); 	// установим пути в SignalK согласно options.logging, однако routeSaveName ещу неизвестно, оно устанавливается в openTrack()
 	logging = false;	// укажем, что на самом деле запись трека не происходит
 	//app.debug('Start, logging=',logging,'navigation.trip.logging.value',app.getSelfPath('navigation.trip.logging.value'));
 	
@@ -102,6 +94,109 @@ plugin.start = function (options, restartPlugin) {
 	
 	
 	// Объявления функций
+
+	function doLogging(){
+	// Отслеживает состояние navigation.trip.logging на предмет включения и выключения записи трека
+	// И, собственно, включает и выключает. Т.е., делает всю содержательную работу
+	
+		// В первую очередь подпишемся на состояние записи трека
+		const TPVsubscribe = {
+			"context": "vessels.self",
+			"subscribe": [
+				{
+					"path": "navigation.trip.logging",
+					"format": "delta",
+					"policy": "instant",
+					"minPeriod": 0
+				}
+			]
+		};
+		app.subscriptionmanager.subscribe(	// собственно процесс подписывания
+			TPVsubscribe,	// подписка
+			unsubscribesControl,	// массив функций отписки
+			subscriptionError => {	// обработчик ошибки
+				//app.error('Error subscription to control:' + subscriptionError);
+				app.debug('Error subscription to control:' + subscriptionError);
+				app.setPluginError('Error subscription to control:'+subscriptionError.message);
+			},
+			doOnControl	// функция обработки каждой delta
+		); // end subscriptionmanager
+
+		function doOnControl(delta){	
+		// Вызывается на каждое событие по подписке на состояние записи трека
+			delta.updates.forEach(update => {
+				let timestamp = update.timestamp;	
+				update.values.forEach(value => {	// здесь только navigation.trip.logging
+					//app.debug('[doOnControl] value:',value,'getSelfPath:',app.getSelfPath('navigation.trip.logging.value'));
+					switch(value.value.status){
+					case true:
+						//app.debug('Надо включить запись, если она ещё не включена');
+						if(logging) return;	// запись уже включена
+						//app.debug('Запись ещё не включена, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
+						// Новый каталог для треков -- если передан. Это обязательно путь - с / в конце
+						if(value.value.logFile && value.value.logFile.endsWith('/')) {
+							if(value.value.logFile !== options.trackDir) {	// присланный в рассылке каталог не тот, что в конфиге
+								if(!value.value.logFile.startsWith('/')) value.value.logFile = path.join(__dirname,value.value.logFile);	// если путь не абсолютный -- сделаем абсолютным						
+								//app.debug('Новый будущий каталог для треков value.value.logFile=',value.value.logFile);
+								if(createDir(value.value.logFile)) {	// создадим каталог
+									options.trackDir = value.value.logFile;	// сменим каталог
+								}
+								else app.debug('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+							}
+						}
+						switchOn();	// вклчаем запись трека
+						break;
+					case false:
+						//app.debug('Надо выключить запись, logging=',logging,'routeSaveName=',routeSaveName);
+						if(routeSaveName == null) return;	// запись уже выключена
+						//app.debug('Запись ещё не выключена');
+						switchOff();	// выключаем запись трека
+						break;
+					default:	
+					}
+				});
+			});
+		}; // end function doOnControl		
+	}; // end function doLogging
+
+	function switchOn(){
+		logging = openTrack();
+		//app.debug('[switchOn] logging=',logging,'routeSaveName=',routeSaveName);
+		if(logging) {// определим имя файла, запишем заголовки/допишем нужное, и, если ok -- запустим запись
+			//updSKpath(logging,routeSaveName); 	// установим пути в SignalK, только это не работает в силу кривизны SignalK, нужен костыль.
+			// Выполним обновление путей после того, как завершатся все "асинхронные" задачи на этом обороте планировщика.
+			// Корпоративня многозадачность в стиле DOS в 21 веке -- это весело.
+			// костыль к тому, что в SignalK обрабатывается сначала подписка, а потом дерево. 
+			// setImmediate -- то же, что setTimeout(() => {}, 0), но NodeJS-специфично.
+			setImmediate(()=>{updSKpath(logging,routeSaveName)});	
+			realDoLogging();	// запустим собственно процесс записи трека: подпишемся, назначим обработчики и станем писать.
+			app.debug('Log enabled, log file '+routeSaveName);
+			app.setPluginStatus('Log enabled, log file '+routeSaveName);
+		}
+		else {	// запись включить невозможно
+			logging = false;
+			app.debug('Log disabled by return false from openTrack()');
+			app.setPluginStatus('Log disabled. Recording cannot be enabled due to the inability to open the file '+routeSaveName);
+			//setImmediate(()=>{updSKpath(logging,routeSaveName)});
+			plugin.stop();
+			return;
+		}
+		options.logging = logging;
+		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
+	} // end function switchOn
+
+	function switchOff(){
+		unsubscribes.forEach(f => f());	// отписаться от всех подписок и всё остальное, что положили в unsubscribes
+		unsubscribes = [];
+		if(routeSaveName !== null) closeTrack();	// запись могла и не начинаться, routeSaveName нет
+		logging = false;
+		routeSaveName = null;
+		setImmediate(()=>{updSKpath(logging,routeSaveName)});	// обновим SignalK после завершения текущего оборота корпоративной многозадачности
+		app.debug('Log disabled');
+		app.setPluginStatus('Log disabled');
+		options.logging = logging;
+		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
+	} // end function switchOff
 
 	function openTrack(){
 	//
@@ -140,7 +235,7 @@ plugin.start = function (options, restartPlugin) {
 	}
 	//app.debug(routeSaveName,'gpxtrack:',gpxtrack);
 
-	routeSaveName = path.resolve(options.trackDir,routeSaveName);
+	routeSaveName = path.join(options.trackDir,routeSaveName);	// абсолютный путь, потому что каталог -- всегда абсолютный
 	try {
 		fs.appendFileSync(routeSaveName, gpxtrack);
 	} 
@@ -204,7 +299,10 @@ plugin.start = function (options, restartPlugin) {
 						}
 						//app.debug('equirectangularDistance=',equirectangularDistance(lastPosition,value.value),'options.minmove=',options.minmove);
 						// в файле есть хотя бы одна точка, и расстояние от предыдущей до текущей меньше указанного
-						if(!newLog && (equirectangularDistance(lastPosition,value.value)<options.minmove)) return;
+						if(!newLog && (equirectangularDistance(lastPosition,value.value)<options.minmove)) {
+							lastFix = Date.parse(timestamp);
+							return;
+						}
 						let trkpt = '			<trkpt ';
 						trkpt += `lat="${value.value.latitude}" lon="${value.value.longitude}">\n`;
 						trkpt += `				<time> ${timestamp} </time>\n`;
@@ -228,106 +326,6 @@ plugin.start = function (options, restartPlugin) {
 			});
 		} // end function doOnValue
 	} // end function realDoLogging
-
-	function doLogging(){
-	// Отслеживает состояние navigation.trip.logging на предмет включения и выключения записи трека
-	// И, собственно, включает и выключает
-		const TPVsubscribe = {
-			"context": "vessels.self",
-			"subscribe": [
-				{
-					"path": "navigation.trip.logging",
-					"format": "delta",
-					"policy": "instant",
-					"minPeriod": 0
-				}
-			]
-		};
-		app.subscriptionmanager.subscribe(	
-			TPVsubscribe,	// подписка
-			unsubscribesControl,	// массив функций отписки
-			subscriptionError => {	// обработчик ошибки
-				//app.error('Error subscription to control:' + subscriptionError);
-				app.debug('Error subscription to control:' + subscriptionError);
-				app.setPluginError('Error subscription to control:'+subscriptionError.message);
-			},
-			doOnControl	// функция обработки каждой delta
-		); // end subscriptionmanager
-
-		function doOnControl(delta){	
-		//
-			delta.updates.forEach(update => {
-				let timestamp = update.timestamp;	
-				update.values.forEach(value => {	// здесь только navigation.trip.logging
-					//app.debug('[doOnControl] value:',value,'getSelfPath:',app.getSelfPath('navigation.trip.logging.value'));
-					switch(value.value.status){
-					case true:
-						//app.debug('Надо включить запись, если она ещё не включена');
-						if(logging) return;	// запись уже включена
-						//app.debug('Запись ещё не включена, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
-						// Новый каталог для треков -- если передан
-						if(value.value.logFile && (value.value.logFile !== options.trackDir)) {
-							if(!value.value.logFile.endsWith('/')) value.value.logFile = path.dirname(value.value.logFile);
-							if(value.value.logFile!=='.'){
-								if(!value.value.logFile.startsWith('/')) value.value.logFile = path.resolve(__dirname,value.value.logFile);	// если путь не абсолютный -- сделаем абсолютным						
-								//app.debug('Новый каталог для треков value.value.logFile=',value.value.logFile);
-								options.trackDir = value.value.logFile;
-								if(!fs.existsSync(options.trackDir)) fs.mkdirSync(options.trackDir, { recursive: true });
-							}
-						}
-						switchOn();	// вклчаем запись трека
-						break;
-					case false:
-						//app.debug('Надо выключить запись, logging=',logging,'routeSaveName=',routeSaveName);
-						if(!routeSaveName) return;	// запись уже выключена
-						//app.debug('Запись ещё не выключена');
-						switchOff();	// выключаем запись трека
-						break;
-					default:	
-					}
-				});
-			});
-		}; // end function doOnControl		
-	}; // end function doLogging
-
-	function switchOn(){
-		logging = openTrack();
-		//app.debug('logging=',logging,'routeSaveName=',routeSaveName);
-		if(logging) {// определим имя файла, запишем заголовки/допишем нужное, и, если ok -- запустим запись
-			//updSKpath(logging,routeSaveName); 	// установим пути в SignalK, только это не работает в силу кривизны SignalK, нужен костыль.
-			// Выполним обновление путей после того, как завершатся все "асинхронные" задачи на этом обороте планировщика.
-			// Корпоративня многозадачность в стиле DOS в 21 веке -- это весело.
-			// костыль к тому, что в SignalK обрабатывается сначала подписка, а потом дерево. 
-			// setImmediate -- то же, что setTimeout(() => {}, 0), но NodeJS-специфично.
-			setImmediate(()=>{updSKpath(logging,routeSaveName)});	
-			realDoLogging();	// запустим собственно процесс записи трека
-			app.debug('Log enabled, log file '+routeSaveName);
-			app.setPluginStatus('Log enabled, log file '+routeSaveName);
-		}
-		else {	// запись включить невозможно
-			logging = false;
-			app.debug('Log disabled by return false from openTrack()');
-			app.setPluginStatus('Log disabled. Recording cannot be enabled due to the inability to open the file '+routeSaveName);
-			//updSKpath(logging,routeSaveName);
-			setImmediate(()=>{updSKpath(logging,routeSaveName)});
-		}
-		options.logging = logging;
-		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
-	} // end function switchOn
-
-	function switchOff(){
-		unsubscribes.forEach(f => f());	// отписаться от всех подписок и всё остальное, что положили в unsubscribes
-		unsubscribes = [];
-		if(routeSaveName) closeTrack();	// запись могла и не начинаться, routeSaveName нет
-		logging = false;
-		routeSaveName = '';
-		//updSKpath(logging,routeSaveName);
-		setImmediate(()=>{updSKpath(logging,routeSaveName)});
-		app.debug('Log disabled');
-		app.setPluginStatus('Log disabled');
-		options.logging = logging;
-		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
-	} // end function switchOff
 
 
 
@@ -358,6 +356,44 @@ plugin.start = function (options, restartPlugin) {
 		}
 		return data;
 	} // end function tailCustom
+	
+	function createDir(dir){
+	// создаёт указанный каталог, если его нет
+	// а если есть -- проверяет на права
+	// возвращает bool
+		let res = true;
+		if(fs.existsSync(dir)){
+			try{
+				fs.accessSync(dir,fs.constants.R_OK | fs.constants.W_OK);
+			}
+			catch(error){
+				app.debug('[createDir]',error.message);
+				app.setPluginError(`No rights to directory ${dir}`);
+				res = false;
+			}
+		}
+		else{
+			try{
+				fs.mkdirSync(dir,{recursive:true});
+			}
+			catch(error){
+				switch(error.code){
+				case 'EACCES':	// Permission denied
+				case 'EPERM':	// Operation not permitted
+					app.debug(`False to create ${dir} by Permission denied`);
+					app.setPluginError(`False to create ${dir} by Permission denied`);
+					res = false;
+					break;
+				case 'ETIMEDOUT':	// Operation timed out
+					app.debug(`False to create ${dir} by Operation timed out`);
+					app.setPluginError(`False to create ${dir} by Operation timed out`);
+					res = false;
+					break;
+				}
+			}
+		}
+		return res;
+	} // end function createDir
 
 }; 	// end plugin.start
 
@@ -369,12 +405,12 @@ plugin.stop = function () {
 	// Потом отписываемся от подписки на данные
 	unsubscribes.forEach(f => f());
 	unsubscribes = [];
-	// Завершим gpx
-	//if(routeSaveName) closeTrack();	// запись могла и не начинаться, routeSaveName нет
+	// Завершим gpx.
+	// а надо? При следующем запуске файл продолжится...
+	//if(routeSaveName!==null) closeTrack();	// запись могла и не начинаться, routeSaveName нет
 	// Потом обозначаем везде, что записи трека нет
 	logging = false;
-	//updSKpath(logging,routeSaveName);	// изменение navigation.trip.logging
-	setImmediate(()=>{updSKpath(logging,routeSaveName)});
+	setImmediate(()=>{updSKpath(logging,routeSaveName)});	// изменение navigation.trip.logging
 	app.setPluginStatus('Plugin stopped');
 }; // end plugin.stop
 
