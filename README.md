@@ -1,7 +1,7 @@
 [Русское описание](https://github.com/VladimirKalachikhin/naiveGPXlogger/blob/master/README.ru-RU.md)  
 # naiveGPXlogger for SignalK [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
 
-## v. 0.0
+## v. 0.1
 A simple plugin that just records a stream of coordinates to a [.gpx](https://www.topografix.com/gpx.asp) file in the user-defined directory.
 
 ## Features
@@ -9,6 +9,7 @@ A simple plugin that just records a stream of coordinates to a [.gpx](https://ww
 * recording points at a specified distance
 * creating a new segment when the position is lost during the specified time
 * one log for the whole trip or a separate log every day
+* store depth as [Garmin extension](https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd)
 * server reboot resistance
 
 ## Usage
@@ -41,6 +42,6 @@ Use Server -> Plugin Config menu to start plugin and configure parameters.
 
 [Discussions](https://github.com/VladimirKalachikhin/Galadriel-map/discussions)
 
-The forum will be more lively if you make a donation [via PayPal](https://paypal.me/VladimirKalachikhin)  at [galadrielmap@gmail.com](mailto:galadrielmap@gmail.com) or at [ЮMoney](https://yasobe.ru/na/galadrielmap)
+The forum will be more lively if you make a donation at [ЮMoney](https://sobe.ru/na/galadrielmap)
 
 [Paid personal consulting](https://kwork.ru/it-support/20093939/galadrielmap-installation-configuration-and-usage-consulting)  

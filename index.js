@@ -35,9 +35,54 @@ plugin.schema = {
 	},
 	"trackTimeout": {
 		"type": "integer",
-		"title": "A minimum no fix timeout",
+		"title": "A minimum no fix timeout, sec",
 		"description": "A new segment is created if there's no fix written for this interval.",
 		"default": 15
+	},
+	"metadata":{
+		"title": "",
+		"description": "",
+		"type": "object",
+		"properties": {
+			"desk": {
+				"type": "string",
+				"title": "File metadata"
+			},
+			"skipperName": {
+				"type": "boolean",
+				"title": "include skipperName from SignalK to metadata",
+				"description": "",
+				"default": false
+			},
+		}
+	},
+	"depthProp":{
+		"title": "",
+		"description": "Depth storing",
+		"type": "object",
+		"properties": {
+			"enable": {
+				"type": "boolean",
+				"title": "Enable depth storing",
+				"description": "Storing depth info to gpx file doubling it's size",
+				"default": false
+			},
+			"feature":{
+				"type": "string",
+				"title": "Will be stored as Depth:",
+				"enum": [
+					"Depth below surface (DBS)",
+					"Depth below keel (DBK)",
+					"Depth below transducer (DBT)",
+				],
+				"default": "Depth below transducer (DBT)"
+			},
+			"fixDepth": {
+				"type": "boolean",
+				"title": "Trying to correct the depth to Depth below surface (DBS)",
+				"default": true
+			}
+		}
 	},
 	"trackDir": {
 		"type": "string",
@@ -57,18 +102,62 @@ var unsubscribes = []; 	// массив функций, которые отпи�
 var unsubscribesControl = [];	// от подписки на управление
 var	routeSaveName=null; 	// 
 var logging;	// текущее состояние записи трека
-var beginGPX = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
-<gpx xmlns="http://www.topografix.com/GPX/1/1"  creator="${plugin.name}" version="1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
-	<metadata>
-	</metadata>
-	<trk>
-		<trkseg>
-`;
+var beginGPX;	// заголовок файла gpx
 var newLog = false;	// флаг что файл новый, для того, чтобы туда записали хотя бы одну точку
 
 plugin.start = function (options, restartPlugin) {
 //
-	//app.debug('__dirname=',__dirname);
+	//app.debug('__dirname=',__dirname);	
+	//app.debug('options:',options);
+	beginGPX = `<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<gpx version="1.1" creator="${plugin.name}"
+		xmlns="http://www.topografix.com/GPX/1/1"  
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+		xmlns:gpxx="http://www8.garmin.com/xmlschemas/GpxExtensions/v3"
+		xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd https://www8.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd"
+>
+	<metadata>
+	`
+	if(options.metadata.desk) beginGPX += `	<desk>${options.metadata.desk}</desk>`;
+	if(options.metadata.skipperName) {
+		beginGPX += `
+		<author>
+			<name>${app.getSelfPath("communication.skipperName")}</name>
+			<email>${app.getSelfPath("communication.email")}</email>
+		</author>`;
+	}
+	beginGPX += `
+	</metadata>
+	<trk>
+		<trkseg>
+`;
+	// Глубина
+	var depth;
+	var depthFix;
+	var depthProp;
+	if(options.depthProp.feature.includes('DBS')) {
+		depthProp = 'environment.depth.belowSurface';
+		depthFix = 0;
+	}
+	else if(options.depthProp.feature.includes('DBK')) {
+		depthProp = 'environment.depth.belowKeel';
+		depthFix = app.getSelfPath('design.draft.value.maximum');
+		if(!depthFix){
+			let transducerToKeel = app.getSelfPath('environment.depth.transducerToKeel.value');
+			let surfaceToTransducer = app.getSelfPath('environment.depth.surfaceToTransducer.value');
+			if(transducerToKeel && surfaceToTransducer) depthFix = transducerToKeel + surfaceToTransducer;
+		}
+	}
+	else if(options.depthProp.feature.includes('DBT')) {
+		depthProp = 'environment.depth.belowTransducer';
+		depthFix = app.getSelfPath('environment.depth.surfaceToTransducer.value');
+		if(!depthFix){
+			let draft = app.getSelfPath('design.draft.value.maximum');
+			let transducerToKeel = app.getSelfPath('environment.depth.transducerToKeel.value');
+			if(transducerToKeel && draft) depthFix = draft - transducerToKeel;
+		}
+	}
+	//app.debug('depthProp=',depthProp,'depthFix=',depthFix);
 	
 	// Установка умолчального значения каталога для записи лога
 	if(!options.trackDir) options.trackDir = 'track';
@@ -262,6 +351,15 @@ plugin.start = function (options, restartPlugin) {
 				}
 			]
 		}
+		if(options.depthProp.enable){
+			TPVsubscribe.subscribe.push({
+				"path": depthProp,
+				"format": "delta",
+				"policy": "instant",
+				"minPeriod": options.trackFrequency
+			});
+		}
+		//app.debug('TPVsubscribe:',TPVsubscribe);
 		// документации на эту штуку так и нет, но удалось узнать, что вызывать это можно много раз с разными подписками
 		app.subscriptionmanager.subscribe(	
 			TPVsubscribe,	// подписка
@@ -290,7 +388,7 @@ plugin.start = function (options, restartPlugin) {
 				//app.debug(update);
 				let timestamp = update.timestamp;	
 				update.values.forEach(value => {	// если подписка только на координаты -- здесь будут только координаты
-					//app.debug(value);
+					//app.debug('[doOnValue] value:',value);
 					switch(value.path){
 					case "navigation.position":
 						if(!lastPosition) {
@@ -306,6 +404,15 @@ plugin.start = function (options, restartPlugin) {
 						let trkpt = '			<trkpt ';
 						trkpt += `lat="${value.value.latitude}" lon="${value.value.longitude}">\n`;
 						trkpt += `				<time> ${timestamp} </time>\n`;
+						if(options.depthProp.enable && (depth !== undefined)){
+							//app.debug('depth=',depth);
+							trkpt += `				<extensions>
+					<gpxx:TrackPointExtension>
+						<gpxx:Depth>${depth}</gpxx:Depth>
+					</gpxx:TrackPointExtension>
+				</extensions>
+`;
+						}
 						trkpt += '			</trkpt>\n';
 						// если долго не было координат -- сначала завершим сегмент
 						if((Date.parse(timestamp)-lastFix)>(options.trackTimeout*1000)) trkpt = '		</trkseg>\n		<trkseg>\n' + trkpt;	
@@ -320,6 +427,10 @@ plugin.start = function (options, restartPlugin) {
 						newLog = false;
 						lastPosition = value.value;	// новая последняя позиция
 						lastFix = Date.parse(timestamp);
+						break;
+					case depthProp:
+						depth = Math.round(value.value*100)/100;
+						if(options.depthProp.fixDepth && (depthFix !== undefined)) depth += depthFix;
 						break;
 					}
 				});

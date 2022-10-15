@@ -2,7 +2,7 @@
 # naiveGPXlogger для SignalK [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
 
 
-## v. 0.0
+## v. 0.1
 Плагин для SignalK, простое средство для записи потока координат в файл [.gpx](https://www.topografix.com/gpx.asp)
 
 ## Возможности
@@ -10,6 +10,7 @@
 * запись точек через указанное расстояние
 * создание нового сегмента при потере координат дольше указанного времени
 * запись всего пути путешествия в один файл или создание отдельных файлов каждый день
+* запись глубины (в формате [Garmin extension](https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd), в gpx своего способа сохранения информации о глубине не предусмотрено)
 * при перезапуске сервера запись пути продолжится
 
 ## Использование
@@ -41,6 +42,6 @@ naiveGPXlogger создаёт путь **navigation.trip.logging** в модел
 
 [Форум](https://github.com/VladimirKalachikhin/Galadriel-map/discussions)
 
-Форум будет живее, если вы сделаете пожертвование [через PayPal](https://paypal.me/VladimirKalachikhin) по адресу [galadrielmap@gmail.com](mailto:galadrielmap@gmail.com) или на [ЮМани](https://yasobe.ru/na/galadrielmap).
+Форум будет живее, если вы сделаете пожертвование на [ЮМани](https://sobe.ru/na/galadrielmap).
 
 Вы можете получить [индивидуальную платную консультацию](https://kwork.ru/training-consulting/20093293/konsultatsii-po-ustanovke-i-ispolzovaniyu-galadrielmap) по вопросам установки и использования всех продуктов для [GaladrielMap](https://www.npmjs.com/package/galadrielmap_sk).
