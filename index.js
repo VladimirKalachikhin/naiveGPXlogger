@@ -404,14 +404,20 @@ plugin.start = function (options, restartPlugin) {
 						let trkpt = '			<trkpt ';
 						trkpt += `lat="${value.value.latitude}" lon="${value.value.longitude}">\n`;
 						trkpt += `				<time> ${timestamp} </time>\n`;
+						// Здесь в каждую точку записывается глубина вне зависимости от того,
+						// когда она была получена. Правильно ли это?
 						if(options.depthProp.enable && (depth !== undefined)){
-							//app.debug('depth=',depth);
+							app.debug('Записана depth=',depth);
 							trkpt += `				<extensions>
 					<gpxx:TrackPointExtension>
 						<gpxx:Depth>${depth}</gpxx:Depth>
 					</gpxx:TrackPointExtension>
 				</extensions>
 `;
+							// Однако, так глубина записывается только в точку, создаваемую
+							// сразу после получения глубины.
+							// в остальные точки до следующего получения глубины глубина не пишется.
+							depth = undefined;
 						}
 						trkpt += '			</trkpt>\n';
 						// если долго не было координат -- сначала завершим сегмент
@@ -431,6 +437,7 @@ plugin.start = function (options, restartPlugin) {
 					case depthProp:
 						depth = Math.round(value.value*100)/100;
 						if(options.depthProp.fixDepth && (depthFix !== undefined)) depth += depthFix;
+						app.debug('Получена depth=',depth);
 						break;
 					}
 				});

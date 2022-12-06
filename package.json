@@ -1,6 +1,6 @@
 {
   "name": "naivegpxlogger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Simple SignalK gpx logger",
   "main": "index.js",
   "keywords": [
