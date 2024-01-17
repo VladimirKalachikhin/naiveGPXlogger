@@ -44,7 +44,7 @@ plugin.schema = {
 		"description": "",
 		"type": "object",
 		"properties": {
-			"desk": {
+			"desc": {
 				"type": "string",
 				"title": "File metadata"
 			},
@@ -104,6 +104,8 @@ var	routeSaveName=null; 	//
 var logging;	// текущее состояние записи трека
 var beginGPX;	// заголовок файла gpx
 var newLog = false;	// флаг что файл новый, для того, чтобы туда записали хотя бы одну точку
+var signalKperformanceFileName = 'signalKperformance.csv';	// имя файла со статистикой производительности, находится в trackDir, при отсутствии - сбор не производится.
+//var signalKperformanceFileName = false;
 
 plugin.start = function (options, restartPlugin) {
 //
@@ -117,11 +119,10 @@ plugin.start = function (options, restartPlugin) {
 		xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd https://www8.garmin.com/xmlschemas/GpxExtensions/v3 https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd"
 >
 	<metadata>
-	`
-	if(options.metadata.desk) beginGPX += `	<desk>${options.metadata.desk}</desk>`;
+`;
+	if(options.metadata.desc) beginGPX += `	<desc>${options.metadata.desc}</desc>`;
 	if(options.metadata.skipperName) {
-		beginGPX += `
-		<author>
+		beginGPX += `		<author>
 			<name>${app.getSelfPath("communication.skipperName")}</name>
 			<email>${app.getSelfPath("communication.email")}</email>
 		</author>`;
@@ -170,13 +171,22 @@ plugin.start = function (options, restartPlugin) {
 	}
 
 	logging = options.logging;
-	app.debug('plugin started, now logging is',logging,'log dir is',options.trackDir);
+	//app.debug('plugin started, now logging is',logging,'log dir is',options.trackDir);
 	app.setPluginStatus(`Started, now 'logging' setted to ${logging}, log dir is ${options.trackDir}, ready to recording.`);
-	updSKpath(logging,routeSaveName); 	// установим пути в SignalK согласно options.logging, однако routeSaveName ещу неизвестно, оно устанавливается в openTrack()
+	// app.subscriptionmanager возвращает что-то при подписке?
+	//app.debug('Initializing SignalK path ');
+	//app.debug('Starting updSKpath in plugin.start ');
+	updSKpath(logging,routeSaveName); 	// установим пути в SignalK согласно options.logging, однако routeSaveName ещё неизвестно, оно устанавливается в openTrack()
+	//process.nextTick(()=>{updSKpath(logging,routeSaveName)});	// https://nodejs.org/en/learn/asynchronous-work/understanding-processnexttick https://nodejs.org/en/learn/asynchronous-work/understanding-setimmediate
 	logging = false;	// укажем, что на самом деле запись трека не происходит
 	//app.debug('Start, logging=',logging,'navigation.trip.logging.value',app.getSelfPath('navigation.trip.logging.value'));
 	
-	doLogging();	// запустим отслеживание включения и выключения записи трека, и будем это включать/выключать	
+	// Запустить doLogging нужно гарантированно после отрабатывания updSKpath выше,
+	// а оно, ...., асинхронное. Если updSKpath не успеет отработать до запуска doLogging,
+	// логирование не включится вообще, потому что не на что будет подписываться.
+	setImmediate(()=>{doLogging()});	// запустим в следующем обороте
+	//setTimeout(() => {doLogging()}, 5000);
+	//doLogging();	// запустим отслеживание включения и выключения записи трека, и будем это включать/выключать	
 
 	return;		// конец содержательной части plugin.start
 	
@@ -187,6 +197,9 @@ plugin.start = function (options, restartPlugin) {
 	function doLogging(){
 	// Отслеживает состояние navigation.trip.logging на предмет включения и выключения записи трека
 	// И, собственно, включает и выключает. Т.е., делает всю содержательную работу
+	
+		let res = app.getSelfPath('navigation.trip.logging');
+		//app.debug('[doLogging] is navigation.trip.logging present?',res);
 	
 		// В первую очередь подпишемся на состояние записи трека
 		const TPVsubscribe = {
@@ -200,6 +213,7 @@ plugin.start = function (options, restartPlugin) {
 				}
 			]
 		};
+		//app.debug('[doLogging] Subscribing to navigation.trip.logging via app.subscriptionmanager.subscribe by send',JSON.stringify(TPVsubscribe));
 		app.subscriptionmanager.subscribe(	// собственно процесс подписывания
 			TPVsubscribe,	// подписка
 			unsubscribesControl,	// массив функций отписки
@@ -210,9 +224,11 @@ plugin.start = function (options, restartPlugin) {
 			},
 			doOnControl	// функция обработки каждой delta
 		); // end subscriptionmanager
+		//app.debug('[doLogging] Subscribed to navigation.trip.logging');
 
 		function doOnControl(delta){	
 		// Вызывается на каждое событие по подписке на состояние записи трека
+			//app.debug('[doOnControl] navigation.trip.logging event fired!');
 			delta.updates.forEach(update => {
 				let timestamp = update.timestamp;	
 				update.values.forEach(value => {	// здесь только navigation.trip.logging
@@ -221,7 +237,7 @@ plugin.start = function (options, restartPlugin) {
 					case true:
 						//app.debug('Надо включить запись, если она ещё не включена');
 						if(logging) return;	// запись уже включена
-						//app.debug('Запись ещё не включена, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
+						//app.debug('[doOnControl] Recording is not enabled yet, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
 						// Новый каталог для треков -- если передан. Это обязательно путь - с / в конце
 						if(value.value.logFile && value.value.logFile.endsWith('/')) {
 							if(value.value.logFile !== options.trackDir) {	// присланный в рассылке каталог не тот, что в конфиге
@@ -230,18 +246,22 @@ plugin.start = function (options, restartPlugin) {
 								if(createDir(value.value.logFile)) {	// создадим каталог
 									options.trackDir = value.value.logFile;	// сменим каталог
 								}
-								else app.debug('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+								else {
+									app.debug('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+									app.setPluginError('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+								}
 							}
 						}
 						switchOn();	// вклчаем запись трека
 						break;
 					case false:
-						//app.debug('Надо выключить запись, logging=',logging,'routeSaveName=',routeSaveName);
+						//app.debug('[doOnControl] Need to turn off the recording, logging=',logging,'routeSaveName=',routeSaveName);
 						if(routeSaveName == null) return;	// запись уже выключена
-						//app.debug('Запись ещё не выключена');
+						//app.debug('Recording is not turned off yet, turning off');
 						switchOff();	// выключаем запись трека
 						break;
 					default:	
+						app.debug('[doOnControl] strange value of navigation.trip.logging:',value);
 					}
 				});
 			});
@@ -257,6 +277,7 @@ plugin.start = function (options, restartPlugin) {
 			// Корпоративня многозадачность в стиле DOS в 21 веке -- это весело.
 			// костыль к тому, что в SignalK обрабатывается сначала подписка, а потом дерево. 
 			// setImmediate -- то же, что setTimeout(() => {}, 0), но NodeJS-специфично.
+			//app.debug('Start updSKpath in switchOn, if recorging possible ');
 			setImmediate(()=>{updSKpath(logging,routeSaveName)});	
 			realDoLogging();	// запустим собственно процесс записи трека: подпишемся, назначим обработчики и станем писать.
 			app.debug('Log enabled, log file '+routeSaveName);
@@ -271,7 +292,9 @@ plugin.start = function (options, restartPlugin) {
 			return;
 		}
 		options.logging = logging;
-		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
+		app.savePluginOptions(options, () => {
+				//app.debug('Options saved by Logging switch on');
+			});
 	} // end function switchOn
 
 	function switchOff(){
@@ -280,11 +303,14 @@ plugin.start = function (options, restartPlugin) {
 		if(routeSaveName !== null) closeTrack();	// запись могла и не начинаться, routeSaveName нет
 		logging = false;
 		routeSaveName = null;
+		//app.debug('Start updSKpath in switchOff ');
 		setImmediate(()=>{updSKpath(logging,routeSaveName)});	// обновим SignalK после завершения текущего оборота корпоративной многозадачности
 		app.debug('Log disabled');
 		app.setPluginStatus('Log disabled');
 		options.logging = logging;
-		app.savePluginOptions(options, () => {app.debug('Options saved by Logging switch')});
+		app.savePluginOptions(options, () => {
+				//app.debug('Options saved by Logging switch off');
+			});
 	} // end function switchOff
 
 	function openTrack(){
@@ -322,8 +348,8 @@ plugin.start = function (options, restartPlugin) {
 		gpxtrack = beginGPX;
 		newLog = true;
 	}
-	//app.debug(routeSaveName,'gpxtrack:',gpxtrack);
 
+	//app.debug('[openTrack] routeSaveName before update path=',routeSaveName);
 	routeSaveName = path.join(options.trackDir,routeSaveName);	// абсолютный путь, потому что каталог -- всегда абсолютный
 	try {
 		fs.appendFileSync(routeSaveName, gpxtrack);
@@ -361,6 +387,7 @@ plugin.start = function (options, restartPlugin) {
 		}
 		//app.debug('TPVsubscribe:',TPVsubscribe);
 		// документации на эту штуку так и нет, но удалось узнать, что вызывать это можно много раз с разными подписками
+		//app.debug('[realDoLogging] Subscribing to navigation.position via app.subscriptionmanager.subscribe by send',JSON.stringify(TPVsubscribe));
 		app.subscriptionmanager.subscribe(	
 			TPVsubscribe,	// подписка
 			unsubscribes,	// массив функций отписки
@@ -371,6 +398,7 @@ plugin.start = function (options, restartPlugin) {
 			},
 			doOnValue	// функция обработки каждой delta
 		); // end subscriptionmanager
+		//app.debug('[realDoLogging] Subscribed to navigation.position');
 
 		function doOnValue(delta){	
 			//
@@ -381,6 +409,7 @@ plugin.start = function (options, restartPlugin) {
 					switchOff();
 					switchOn();
 					app.debug('Opened new track by new day');
+					app.setPluginStatus('Opened new track by new day');
 				}
 			}
 
@@ -407,7 +436,7 @@ plugin.start = function (options, restartPlugin) {
 						// Здесь в каждую точку записывается глубина вне зависимости от того,
 						// когда она была получена. Правильно ли это?
 						if(options.depthProp.enable && (depth !== undefined)){
-							app.debug('Записана depth=',depth);
+							//app.debug('Записана depth=',depth);
 							trkpt += `				<extensions>
 					<gpxx:TrackPointExtension>
 						<gpxx:Depth>${depth}</gpxx:Depth>
@@ -430,6 +459,20 @@ plugin.start = function (options, restartPlugin) {
 							console.error('[doOnValue]',err.message);
 							app.setPluginError('Unable write point: '+err.message);
 						}
+						/*/ Тест производительности SignalK
+						if(signalKperformanceFileName){
+							let timeNow = new Date();
+							let timestampDate = new Date(timestamp);
+							let signalKperformance = `${timestamp},${timeNow.toISOString()},${(timeNow.getTime()-timestampDate.getTime())/1000}\n`;
+							let realsignalKperformanceFileName = path.join(options.trackDir,signalKperformanceFileName);	// абсолютный путь, потому что каталог -- всегда абсолютный
+							try {
+								fs.appendFileSync(realsignalKperformanceFileName, signalKperformance);
+							} 
+							catch (err) {
+								console.error('[doOnValue]',err.message);
+							}
+						}
+						/*/ 
 						newLog = false;
 						lastPosition = value.value;	// новая последняя позиция
 						lastFix = Date.parse(timestamp);
@@ -437,7 +480,7 @@ plugin.start = function (options, restartPlugin) {
 					case depthProp:
 						depth = Math.round(value.value*100)/100;
 						if(options.depthProp.fixDepth && (depthFix !== undefined)) depth += depthFix;
-						app.debug('Получена depth=',depth);
+						//app.debug('Получена depth=',depth);
 						break;
 					}
 				});
@@ -471,6 +514,7 @@ plugin.start = function (options, restartPlugin) {
 		}
 		catch(err){
 			app.debug('[tailCustom] False of read '+filepath,err.message);
+			app.setPluginError('[tailCustom] False of read '+filepath,err.message);
 		}
 		return data;
 	} // end function tailCustom
@@ -516,7 +560,7 @@ plugin.start = function (options, restartPlugin) {
 }; 	// end plugin.start
 
 plugin.stop = function () {
-	app.debug('plugin stopped, logging=',logging);	// options здесь нет
+	//app.debug('plugin stopped, logging=',logging);	// options здесь нет
 	// Сначала отписываемся от управляющей подписки, чтобы не сработало изменение navigation.trip.logging
 	unsubscribesControl.forEach(f => f());
 	unsubscribesControl = [];
@@ -528,12 +572,17 @@ plugin.stop = function () {
 	//if(routeSaveName!==null) closeTrack();	// запись могла и не начинаться, routeSaveName нет
 	// Потом обозначаем везде, что записи трека нет
 	logging = false;
-	setImmediate(()=>{updSKpath(logging,routeSaveName)});	// изменение navigation.trip.logging
+	// здесь updSKpath _обязательно_ должен выполнится на этом обороте, иначе
+	// если на следующем, то оно может выполнится _после_ того вызова updSKpath, который
+	// включает запись (но может и до). Тогда запись не включится.
+	//app.debug('Start updSKpath in plugin.stop ');
+	updSKpath(logging,routeSaveName);	// изменение navigation.trip.logging
+	//setImmediate(()=>{updSKpath(logging,routeSaveName)});	// изменение navigation.trip.logging
 	app.setPluginStatus('Plugin stopped');
 }; // end plugin.stop
 
 function closeTrack(){
-	app.debug('closeTrack',routeSaveName);
+	//app.debug('closeTrack',routeSaveName);
 	if(fs.existsSync(routeSaveName)){
 		const close = '		</trkseg>\n	</trk>\n</gpx>';
 		try {
@@ -548,24 +597,26 @@ function closeTrack(){
 
 function updSKpath(status=false,logFile=''){
 	if(status) status = true;	// никогда не должно быть, чтобы status не был boolean, но...
-	app.handleMessage(plugin.id, {
-		context: 'vessels.self',
-		updates: [
+	let delta = {
+		"context": "vessels.self",
+		"updates": [
 			{
-				values: [
+				"values": [
 					{
-						path: 'navigation.trip.logging',
-						value: {
-							status: status,
-							logFile: logFile
+						"path": "navigation.trip.logging",
+						"value": {
+							"status": status,
+							"logFile": logFile
 						}
 					}
 				],
-				source: { label: plugin.id },
-				timestamp: new Date().toISOString(),
+				"source": { "label": plugin.id },
+				"timestamp": new Date().toISOString(),
 			}
 		]
-	});
+	};
+	//app.debug('[updSKpath] by app.handleMessage sended:',JSON.stringify(delta));
+	app.handleMessage(plugin.id,delta);
 } // end function updSKpath()
 
 

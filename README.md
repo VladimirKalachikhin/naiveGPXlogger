@@ -14,7 +14,7 @@ A simple plugin that just records a stream of coordinates to a [.gpx](https://ww
 
 ## Usage
 ### By end user
-Check and uncheck checkbox "Write log" on plugin configuration page in "Plugin Config" menu of SignalK web admin.  
+Check and uncheck checkbox "Write log" on plugin configuration page in "Plugin Config" menu of SignalK web admin. Press Submit.  
 The [GaladrielMap](https://www.npmjs.com/package/galadrielmap_sk) can show a recordable file and has a switch in the interface to control the log recording.
 
 ### By programmer
