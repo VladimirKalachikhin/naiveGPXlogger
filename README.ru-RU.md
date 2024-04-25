@@ -2,7 +2,7 @@
 # naiveGPXlogger для SignalK [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
 
 
-## v. 0.1
+## v. 0.2
 Плагин для SignalK, простое средство для записи потока координат в файл [.gpx](https://www.topografix.com/gpx.asp)
 
 ## Возможности
@@ -12,6 +12,7 @@
 * запись всего пути путешествия в один файл или создание отдельных файлов каждый день
 * запись глубины (в формате [Garmin extension](https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd), в gpx своего способа сохранения информации о глубине не предусмотрено)
 * при перезапуске сервера запись пути продолжится
+* запись пути может быть начата по событию "Человек за бортом" (MOB) на сервере SignalK.
 
 ## Использование
 ## пользователем

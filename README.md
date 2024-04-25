@@ -1,7 +1,7 @@
 [Русское описание](https://github.com/VladimirKalachikhin/naiveGPXlogger/blob/master/README.ru-RU.md)  
 # naiveGPXlogger for SignalK [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
 
-## v. 0.1
+## v. 0.2
 A simple plugin that just records a stream of coordinates to a [.gpx](https://www.topografix.com/gpx.asp) file in the user-defined directory.
 
 ## Features
@@ -11,6 +11,7 @@ A simple plugin that just records a stream of coordinates to a [.gpx](https://ww
 * one log for the whole trip or a separate log every day
 * store depth as [Garmin extension](https://www8.garmin.com/xmlschemas/GpxExtensions/v3/GpxExtensionsv3.xsd)
 * server reboot resistance
+* recording can be initiated by a Man Overboard (MOB) event on the SignalK server
 
 ## Usage
 ### By end user

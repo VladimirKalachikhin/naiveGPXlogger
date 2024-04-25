@@ -94,7 +94,13 @@ plugin.schema = {
 		"title": "Start new track every new day",
 		"description": "",
 		"default": true
-	}
+	},
+	"loggingOnMOB": {
+		"type": "boolean",
+		"title": "Start logging by MOB alarm",
+		"description": "Start logging if MOB alarm raised. If the MOB alarm is canceled, the log recording will continue anyway.",
+		"default": false
+	},
 }
 };
 
@@ -104,7 +110,7 @@ var	routeSaveName=null; 	//
 var logging;	// текущее состояние записи трека
 var beginGPX;	// заголовок файла gpx
 var newLog = false;	// флаг что файл новый, для того, чтобы туда записали хотя бы одну точку
-var signalKperformanceFileName = 'signalKperformance.csv';	// имя файла со статистикой производительности, находится в trackDir, при отсутствии - сбор не производится.
+//var signalKperformanceFileName = 'signalKperformance.csv';	// имя файла со статистикой производительности, находится в trackDir, при отсутствии - сбор не производится.
 //var signalKperformanceFileName = false;
 
 plugin.start = function (options, restartPlugin) {
@@ -198,7 +204,7 @@ plugin.start = function (options, restartPlugin) {
 	// Отслеживает состояние navigation.trip.logging на предмет включения и выключения записи трека
 	// И, собственно, включает и выключает. Т.е., делает всю содержательную работу
 	
-		let res = app.getSelfPath('navigation.trip.logging');
+		//let res = app.getSelfPath('navigation.trip.logging');
 		//app.debug('[doLogging] is navigation.trip.logging present?',res);
 	
 		// В первую очередь подпишемся на состояние записи трека
@@ -212,6 +218,14 @@ plugin.start = function (options, restartPlugin) {
 					"minPeriod": 0
 				}
 			]
+		};
+		if(options.loggingOnMOB){
+			TPVsubscribe.subscribe.push({
+				"path": "notifications.mob",
+				"format": "delta",
+				"policy": "instant",
+				"minPeriod": 0
+			});
 		};
 		//app.debug('[doLogging] Subscribing to navigation.trip.logging via app.subscriptionmanager.subscribe by send',JSON.stringify(TPVsubscribe));
 		app.subscriptionmanager.subscribe(	// собственно процесс подписывания
@@ -233,36 +247,54 @@ plugin.start = function (options, restartPlugin) {
 				let timestamp = update.timestamp;	
 				update.values.forEach(value => {	// здесь только navigation.trip.logging
 					//app.debug('[doOnControl] value:',value,'getSelfPath:',app.getSelfPath('navigation.trip.logging.value'));
-					switch(value.value.status){
-					case true:
-						//app.debug('Надо включить запись, если она ещё не включена');
-						if(logging) return;	// запись уже включена
-						//app.debug('[doOnControl] Recording is not enabled yet, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
-						// Новый каталог для треков -- если передан. Это обязательно путь - с / в конце
-						if(value.value.logFile && value.value.logFile.endsWith('/')) {
-							if(value.value.logFile !== options.trackDir) {	// присланный в рассылке каталог не тот, что в конфиге
-								if(!value.value.logFile.startsWith('/')) value.value.logFile = path.join(__dirname,value.value.logFile);	// если путь не абсолютный -- сделаем абсолютным						
-								//app.debug('Новый будущий каталог для треков value.value.logFile=',value.value.logFile);
-								if(createDir(value.value.logFile)) {	// создадим каталог
-									options.trackDir = value.value.logFile;	// сменим каталог
-								}
-								else {
-									app.debug('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
-									app.setPluginError('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+					switch(value.path){
+					case "navigation.trip.logging":
+						switch(value.value.status){
+						case true:
+							//app.debug('Надо включить запись, если она ещё не включена');
+							if(logging) return;	// запись уже включена
+							//app.debug('[doOnControl] Recording is not enabled yet, value.logFile=',value.value.logFile,'options.trackDir=',options.trackDir);
+							// Новый каталог для треков -- если передан. Это обязательно путь - с / в конце
+							if(value.value.logFile && value.value.logFile.endsWith('/')) {
+								if(value.value.logFile !== options.trackDir) {	// присланный в рассылке каталог не тот, что в конфиге
+									if(!value.value.logFile.startsWith('/')) value.value.logFile = path.join(__dirname,value.value.logFile);	// если путь не абсолютный -- сделаем абсолютным						
+									//app.debug('Новый будущий каталог для треков value.value.logFile=',value.value.logFile);
+									if(createDir(value.value.logFile)) {	// создадим каталог
+										options.trackDir = value.value.logFile;	// сменим каталог
+									}
+									else {
+										app.debug('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+										app.setPluginError('Cannot set a new directory for track recording, the old one is used. New:',value.value.logFile,'Old:',options.trackDir);
+									}
 								}
 							}
+							switchOn();	// вклчаем запись трека
+							break;
+						case false:
+							//app.debug('[doOnControl] Need to turn off the recording, logging=',logging,'routeSaveName=',routeSaveName);
+							if(routeSaveName == null) return;	// запись уже выключена
+							//app.debug('Recording is not turned off yet, turning off');
+							switchOff();	// выключаем запись трека
+							break;
+						default:	
+							app.debug('[doOnControl] strange value of navigation.trip.logging:',value);
+						};
+						break;
+					case "notifications.mob":
+						//app.debug('[doOnControl] MOB case:',value.value);
+						if(!options.loggingOnMOB) break;
+						if(value.value){	// режим MOB есть (причём именно сейчас включен?).
+							//app.debug('Надо включить запись, если она ещё не включена');
+							if(logging) return;	// запись уже включена
+							switchOn();	// вклчаем запись трека
 						}
-						switchOn();	// вклчаем запись трека
+						else {	// режим MOB отсутствует (не обязательно вот только выключен)
+							// Полагаю, что не надо выключать запись пути, если она была включена по MOB
+							// Кроме того, нужно отслеживать, не была ли запись включена до, не выключили ли
+							// её уже, и всё такое.
+						}
 						break;
-					case false:
-						//app.debug('[doOnControl] Need to turn off the recording, logging=',logging,'routeSaveName=',routeSaveName);
-						if(routeSaveName == null) return;	// запись уже выключена
-						//app.debug('Recording is not turned off yet, turning off');
-						switchOff();	// выключаем запись трека
-						break;
-					default:	
-						app.debug('[doOnControl] strange value of navigation.trip.logging:',value);
-					}
+					};
 				});
 			});
 		}; // end function doOnControl		
