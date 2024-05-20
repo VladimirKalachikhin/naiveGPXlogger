@@ -98,7 +98,7 @@ plugin.schema = {
 	"loggingOnMOB": {
 		"type": "boolean",
 		"title": "Start logging by MOB alarm",
-		"description": "Start logging if MOB alarm raised. If the MOB alarm is canceled, the log recording will continue anyway.",
+		"description": "Start logging if the MOB alarm raised. If the MOB alarm is canceled, the log recording will continue anyway.",
 		"default": false
 	},
 }
@@ -243,7 +243,10 @@ plugin.start = function (options, restartPlugin) {
 		function doOnControl(delta){	
 		// Вызывается на каждое событие по подписке на состояние записи трека
 			//app.debug('[doOnControl] navigation.trip.logging event fired!');
-			delta.updates.forEach(update => {
+
+			for(const update of delta.updates) {
+				//app.debug(update);
+				if(!update.values) continue;	// там может быть обновление meta, а не данных
 				let timestamp = update.timestamp;	
 				update.values.forEach(value => {	// здесь только navigation.trip.logging
 					//app.debug('[doOnControl] value:',value,'getSelfPath:',app.getSelfPath('navigation.trip.logging.value'));
@@ -296,7 +299,7 @@ plugin.start = function (options, restartPlugin) {
 						break;
 					};
 				});
-			});
+			};
 		}; // end function doOnControl		
 	}; // end function doLogging
 
@@ -445,8 +448,9 @@ plugin.start = function (options, restartPlugin) {
 				}
 			}
 
-			delta.updates.forEach(update => {
+			for(const update of delta.updates) {
 				//app.debug(update);
+				if(!update.values) continue;	// там может быть обновление meta, а не данных
 				let timestamp = update.timestamp;	
 				update.values.forEach(value => {	// если подписка только на координаты -- здесь будут только координаты
 					//app.debug('[doOnValue] value:',value);
@@ -516,7 +520,7 @@ plugin.start = function (options, restartPlugin) {
 						break;
 					}
 				});
-			});
+			};
 		} // end function doOnValue
 	} // end function realDoLogging
 

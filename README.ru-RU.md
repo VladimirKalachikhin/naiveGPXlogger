@@ -1,5 +1,5 @@
 [In English](https://github.com/VladimirKalachikhin/naiveGPXlogger/blob/master/README.md)  
-# naiveGPXlogger для SignalK [![License: CC BY-SA 4.0](https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
+# naiveGPXlogger for SignalK [![License: CC BY-NC-SA 4.0](Cc-by-nc-sa_icon.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.en)
 
 
 ## v. 0.2
