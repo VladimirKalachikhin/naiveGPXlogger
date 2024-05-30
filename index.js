@@ -286,7 +286,11 @@ plugin.start = function (options, restartPlugin) {
 					case "notifications.mob":
 						//app.debug('[doOnControl] MOB case:',value.value);
 						if(!options.loggingOnMOB) break;
-						if(value.value){	// режим MOB есть (причём именно сейчас включен?).
+						// Похоже, что автор Freeboard-SK индус. В любом случае - он дебил, и
+						// разницы между выключением режима и сменой режима не видит.
+						// Поэтому он выключает режим MOB установкой value.state = "normal"
+						// вместо value = null, как это указано в документации.
+						if(value.value && (value.value.state != "normal")){	// режим MOB есть (причём именно сейчас включен?).
 							//app.debug('Надо включить запись, если она ещё не включена');
 							if(logging) return;	// запись уже включена
 							switchOn();	// вклчаем запись трека
